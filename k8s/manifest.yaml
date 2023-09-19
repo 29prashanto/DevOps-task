@@ -1,0 +1,91 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo-ops
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-app-deployment
+  namespace: demo-ops
+  labels:
+    app: demo-app
+    release: 1
+    env: stage
+
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: demo-app
+      release: 1
+  template:
+    metadata:
+      labels:
+        app: demo-app
+        release: 1
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 3000
+        fsGroup: 2000
+      containers:
+        - name: demo-app-container
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "512M"
+            limits:
+              cpu: "200m"
+              memory: "1G"        
+          image: 29prashanto/demo-app:2
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: app
+              containerPort: 8080
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            periodSeconds: 5
+            successThreshold: 1
+            timeoutSeconds: 5
+            initialDelaySeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            periodSeconds: 5
+            successThreshold: 2
+            timeoutSeconds: 5
+            initialDelaySeconds: 20
+          env:  # Define environment variables here
+            - name: DEMO_APP_ADDR
+              value: "0.0.0.0:8080"
+            - name: DEMO_REDIS_ADDR
+              value: "redis:6379"
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo-app-service
+  labels:
+    env: stage
+    release: 1
+    app: demo-app
+  namespace: demo-ops
+spec:
+  type: ClusterIP
+  ports:
+    - port: 80
+      targetPort: 8080
+      protocol: TCP
+      name: http
+  selector:
+    app: demo-app
+    release: 1

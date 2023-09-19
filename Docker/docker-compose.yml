@@ -1,0 +1,40 @@
+version: "3"
+services:
+  redis:
+    image: redis:latest
+    container_name: redis
+    volumes:
+      - ./redis-data:/data
+    ports:
+      - "6379:6379"
+
+  app:
+    # build:
+    #   context: ../../task
+    #   dockerfile: Dockerfile
+    image: 29prashanto/demo-app:2
+    container_name: go-app
+    environment:
+      - DEMO_REDIS_ADDR=redis:6379
+      - DEMO_APP_ADDR=:8080
+    depends_on:
+      - redis
+    ports:
+      - "8080:8080"
+      
+  nginx:
+    image: nginx:latest
+    container_name: nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx-config/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx-config/default.conf:/etc/nginx/conf.d/default.conf
+      - ./nginx-config/ssl/server.crt:/etc/nginx/ssl/server.crt
+      - ./nginx-config/ssl/server.key:/etc/nginx/ssl/server.key
+    depends_on:
+      - app
+
+volumes:
+  redis-data:

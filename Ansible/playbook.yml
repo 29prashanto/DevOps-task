@@ -1,0 +1,131 @@
+---
+- name: Provision VM and Deploy Application
+  hosts: all
+  become: yes  # To execute tasks as root
+  tasks:
+    - name: Set hostname to 'demo-ops'
+      hostname:
+        name: demo-ops
+
+    - name: Create user 'demo'
+      user:
+        name: demo
+        state: present
+        shell: /bin/bash
+
+    - name: Disable root login
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^PermitRootLogin'
+        line: 'PermitRootLogin no'
+      notify: Reload SSH
+
+    - name: Setup basic firewall (UFW)
+      apt:
+        name: ufw
+        state: present
+      when: ansible_distribution == 'Ubuntu'
+      
+    - name: Allow SSH, HTTP, and HTTPS through the firewall
+      command: ufw allow {{ item }}
+      loop:
+        - 22/tcp
+        - 80/tcp
+        - 443/tcp
+        - 6379/tcp
+        - 8080/tcp
+      when: ansible_distribution == 'Ubuntu'
+
+    - name: Start and enable UFW
+      command: ufw --force enable
+      when: ansible_distribution == 'Ubuntu'
+      
+    - name: Configure sysctl for sane defaults
+      sysctl:
+        name: "{{ item.name }}"
+        value: "{{ item.value }}"
+        state: present
+        sysctl_set: yes
+      loop:
+        - { name: 'fs.file-max', value: '65535', justification: 'Increase the maximum number of file handles to support a high number of open files by processes.' }
+        - { name: 'vm.swappiness', value: '10', justification: 'Lower swappiness to minimize swapping and prioritize using physical RAM over swap space.' }
+        # Add more sysctl parameters as needed
+
+    - name: Set the system timezone to 'Asia/Kolkata'
+      timezone:
+        name: Asia/Kolkata
+      notify: Reload Systemd
+
+    - name: Add Docker GPG apt Key
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Add Docker Repository
+      apt_repository:
+        repo: deb [arch=amd64] https://download.docker.com/{{ ansible_system | lower }}/{{ ansible_distribution | lower }} {{ ansible_distribution_release }} stable
+        state: present
+
+    - name: Install Docker and Docker-Compose
+      apt:
+        name: "{{ item }}"
+        state: present
+        update_cache: yes
+      loop:
+        - apt-transport-https
+        - ca-certificates
+        - curl
+        - software-properties-common
+        - docker
+        - docker.io
+        - docker-registry
+        - python3-pip
+        - virtualenv
+        - python3-setuptools
+        - docker-compose
+      when: ansible_distribution == 'Ubuntu'
+
+
+    - name: Configure Docker Daemon with sane defaults
+      template:
+        src: ../Docker/docker-daemon.json.j2
+        dest: /etc/docker/daemon.json
+      notify: Reload Docker
+
+    - name: Ensure /etc/demo-ops directory exists
+      file:
+        path: /etc/demo-ops
+        state: directory
+
+
+    - name: Copy Docker Compose directory to /etc/demo-ops
+      ansible.posix.synchronize:
+        src: ../Docker/
+        dest: /etc/demo-ops/
+
+    - name: Start Docker Compose services
+      command: docker-compose up -d
+      args:
+        chdir: /etc/demo-ops
+
+    - name: Deploy Docker Compose application
+      docker_compose:
+        project_src: /etc/demo-ops
+        state: present
+      notify: Reload Docker
+
+  handlers:
+    - name: Reload SSH
+      service:
+        name: ssh
+        state: restarted
+
+    - name: Reload Systemd
+      systemd:
+        name: systemd-timesyncd
+        state: restarted
+
+    - name: Reload Docker
+      service:
+        name: docker
+        state: restarted
